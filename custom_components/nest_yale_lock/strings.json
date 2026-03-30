@@ -58,6 +58,9 @@
       },
       "last_action": {
         "name": "Last Action"
+      },
+      "guest_passcodes": {
+        "name": "Guest Passcodes"
       }
     },
     "switch": {

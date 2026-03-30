@@ -24,6 +24,10 @@ LAST_ACTION_SENSOR_DESC = SensorEntityDescription(
     key="last_action",
     translation_key="last_action",
 )
+GUEST_PASSCODES_SENSOR_DESC = SensorEntityDescription(
+    key="guest_passcodes",
+    translation_key="guest_passcodes",
+)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
@@ -58,6 +62,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                     new_entities.append(NestYaleLastActionSensor(coordinator, device))
                     added.add(last_action_uid)
                     _LOGGER.debug("Prepared new last action sensor entity: %s", last_action_uid)
+
+                # Guest Passcodes (diagnostic)
+                passcodes_uid = f"{DOMAIN}_guest_passcodes_{device_id}"
+                traits = device.get("traits", {})
+                if passcodes_uid not in added and traits.get("UserPincodesSettingsTrait"):
+                    new_entities.append(NestYaleGuestPasscodesSensor(coordinator, device))
+                    added.add(passcodes_uid)
+                    _LOGGER.debug("Prepared new guest passcodes sensor entity: %s", passcodes_uid)
             except Exception as e:
                 _LOGGER.error("Failed to create battery sensor for %s: %s", device_id, e, exc_info=True)
         if new_entities:
@@ -147,3 +159,69 @@ class NestYaleLastActionSensor(NestYaleEntity, SensorEntity):
     def _handle_coordinator_update(self) -> None:
         self._apply_coordinator_update()
         self.async_write_ha_state()
+
+
+class NestYaleGuestPasscodesSensor(NestYaleEntity, SensorEntity):
+    """Diagnostic sensor exposing guest passcode slot data."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_translation_key = "guest_passcodes"
+    entity_description = GUEST_PASSCODES_SENSOR_DESC
+
+    def __init__(self, coordinator, device):
+        device_id = device.get("device_id")
+        if not device_id:
+            raise ValueError("device_id is required for guest passcodes sensor")
+        super().__init__(coordinator, device_id, device)
+        self._attr_unique_id = f"{DOMAIN}_guest_passcodes_{device_id}"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the number of active guest passcodes."""
+        pincodes = self._user_pincodes()
+        if not pincodes:
+            return None
+        return sum(
+            1 for p in pincodes.values()
+            if p.get("has_passcode") and p.get("enabled") is not False
+        )
+
+    @property
+    def extra_state_attributes(self):
+        """Return per-slot guest passcode details and capabilities."""
+        attrs = {}
+        traits = self._device_data.get("traits", {})
+
+        caps = traits.get("UserPincodesCapabilitiesTrait", {})
+        if caps:
+            attrs["min_passcode_length"] = caps.get("min_pincode_length")
+            attrs["max_passcode_length"] = caps.get("max_pincode_length")
+            attrs["max_passcodes_supported"] = caps.get("max_pincodes_supported")
+
+        pincodes = self._user_pincodes()
+        if pincodes:
+            slots = []
+            for slot, info in sorted(pincodes.items(), key=lambda x: int(x[0])):
+                slots.append({
+                    "slot": int(slot),
+                    "user_id": info.get("user_id"),
+                    "enabled": info.get("enabled"),
+                    "has_passcode": info.get("has_passcode"),
+                })
+            attrs["slots"] = slots
+
+        return attrs
+
+    def _user_pincodes(self) -> dict:
+        traits = self._device_data.get("traits", {})
+        settings = traits.get("UserPincodesSettingsTrait", {})
+        return settings.get("user_pincodes", {})
+
+    def _handle_coordinator_update(self) -> None:
+        self._apply_coordinator_update()
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        return self._stream_available()
