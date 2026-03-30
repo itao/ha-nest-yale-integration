@@ -1266,13 +1266,16 @@ class NestAPIClient:
 
     def _schedule_legacy_name_refresh(self, reason: str) -> None:
         if not self.access_token:
+            _LOGGER.warning("GUEST_NAME_DEBUG schedule skipped: no access_token (%s)", reason)
             return
         if self._legacy_name_task and not self._legacy_name_task.done():
+            _LOGGER.warning("GUEST_NAME_DEBUG schedule skipped: task already running (%s)", reason)
             return
         now = asyncio.get_event_loop().time()
         if self._legacy_name_last_fetch and (now - self._legacy_name_last_fetch) < _APP_LAUNCH_REFRESH_SECONDS:
+            _LOGGER.warning("GUEST_NAME_DEBUG schedule skipped: throttled (%s)", reason)
             return
-        _LOGGER.debug("Scheduling legacy name refresh (%s)", reason)
+        _LOGGER.warning("GUEST_NAME_DEBUG scheduling legacy name refresh (%s)", reason)
         self._legacy_name_task = asyncio.create_task(self._refresh_legacy_device_names(reason))
 
     def _legacy_app_launch_host(self) -> str:
@@ -1341,11 +1344,13 @@ class NestAPIClient:
 
     async def _refresh_legacy_device_names(self, reason: str) -> None:
         try:
+            _LOGGER.warning("GUEST_NAME_DEBUG _refresh_legacy_device_names called, reason=%s", reason)
             if not self.access_token:
+                _LOGGER.warning("GUEST_NAME_DEBUG no access_token, returning")
                 return
             user_candidates = self._legacy_user_candidates()
             if not user_candidates:
-                _LOGGER.debug("Skipping app_launch name refresh (%s): no user id candidates", reason)
+                _LOGGER.warning("GUEST_NAME_DEBUG no user_id candidates, returning")
                 return
             host = self._legacy_app_launch_host()
             payload = {
@@ -1377,19 +1382,15 @@ class NestAPIClient:
                         reason,
                         request_user_id,
                     )
+                    _LOGGER.warning("GUEST_NAME_DEBUG attempting app_launch for user_id=%s", request_user_id)
                     async with self.session.post(
                         url,
                         json=payload,
                         headers=headers,
                         timeout=timeout,
                     ) as resp:
+                        _LOGGER.warning("GUEST_NAME_DEBUG app_launch status=%s for user_id=%s", resp.status, request_user_id)
                         if resp.status != 200:
-                            _LOGGER.debug(
-                                "app_launch returned status %s for user_id=%s (%s)",
-                                resp.status,
-                                request_user_id,
-                                reason,
-                            )
                             continue
                         data = await resp.json()
                     # --- DEBUG: log user/guest bucket data for name mapping ---
