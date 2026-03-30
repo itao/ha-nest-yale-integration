@@ -1266,16 +1266,13 @@ class NestAPIClient:
 
     def _schedule_legacy_name_refresh(self, reason: str) -> None:
         if not self.access_token:
-            _LOGGER.warning("GUEST_NAME_DEBUG schedule skipped: no access_token (%s)", reason)
             return
         if self._legacy_name_task and not self._legacy_name_task.done():
-            _LOGGER.warning("GUEST_NAME_DEBUG schedule skipped: task already running (%s)", reason)
             return
         now = asyncio.get_event_loop().time()
         if self._legacy_name_last_fetch and (now - self._legacy_name_last_fetch) < _APP_LAUNCH_REFRESH_SECONDS:
-            _LOGGER.warning("GUEST_NAME_DEBUG schedule skipped: throttled (%s)", reason)
             return
-        _LOGGER.warning("GUEST_NAME_DEBUG scheduling legacy name refresh (%s)", reason)
+        _LOGGER.debug("Scheduling legacy name refresh (%s)", reason)
         self._legacy_name_task = asyncio.create_task(self._refresh_legacy_device_names(reason))
 
     def _legacy_app_launch_host(self) -> str:
@@ -1344,13 +1341,11 @@ class NestAPIClient:
 
     async def _refresh_legacy_device_names(self, reason: str) -> None:
         try:
-            _LOGGER.warning("GUEST_NAME_DEBUG _refresh_legacy_device_names called, reason=%s", reason)
             if not self.access_token:
-                _LOGGER.warning("GUEST_NAME_DEBUG no access_token, returning")
                 return
             user_candidates = self._legacy_user_candidates()
             if not user_candidates:
-                _LOGGER.warning("GUEST_NAME_DEBUG no user_id candidates, returning")
+                _LOGGER.debug("Skipping app_launch name refresh (%s): no user id candidates", reason)
                 return
             host = self._legacy_app_launch_host()
             payload = {
@@ -1382,19 +1377,21 @@ class NestAPIClient:
                         reason,
                         request_user_id,
                     )
-                    _LOGGER.warning("GUEST_NAME_DEBUG attempting app_launch for user_id=%s", request_user_id)
                     async with self.session.post(
                         url,
                         json=payload,
                         headers=headers,
                         timeout=timeout,
                     ) as resp:
-                        _LOGGER.warning("GUEST_NAME_DEBUG app_launch status=%s for user_id=%s", resp.status, request_user_id)
                         if resp.status != 200:
+                            _LOGGER.debug(
+                                "app_launch returned status %s for user_id=%s (%s)",
+                                resp.status,
+                                request_user_id,
+                                reason,
+                            )
                             continue
                         data = await resp.json()
-                    # --- DEBUG: log user/guest bucket data for name mapping ---
-                    self._log_user_guest_buckets(data)
                     overrides = self._extract_legacy_device_names(data)
                     if overrides:
                         self._legacy_name_overrides.update(overrides)
@@ -1528,36 +1525,6 @@ class NestAPIClient:
                     serial_map,
                     results,
                 )
-
-    def _log_user_guest_buckets(self, data: dict) -> None:
-        """Log user/guest bucket data from app_launch for name mapping analysis."""
-        if not isinstance(data, dict):
-            return
-        import json as _json
-        for top_key in ("user", "kryptonite", "shared", "structure", "link"):
-            if top_key in data:
-                try:
-                    snippet = _json.dumps(data[top_key], default=str)
-                    if len(snippet) > 5000:
-                        snippet = snippet[:5000] + "...(truncated)"
-                    _LOGGER.warning(
-                        "GUEST_NAME_DEBUG app_launch[%s]: %s", top_key, snippet,
-                    )
-                except Exception:
-                    _LOGGER.warning("GUEST_NAME_DEBUG app_launch[%s]: (unserializable)", top_key)
-        # Also check for updated_buckets pattern
-        for bucket in data.get("updated_buckets", data.get("objects", [])):
-            if not isinstance(bucket, dict):
-                continue
-            obj_key = bucket.get("object_key", "")
-            if any(prefix in str(obj_key) for prefix in ("user.", "kryptonite.", "link.", "shared.")):
-                try:
-                    snippet = _json.dumps(bucket, default=str)
-                    if len(snippet) > 3000:
-                        snippet = snippet[:3000] + "...(truncated)"
-                    _LOGGER.warning("GUEST_NAME_DEBUG bucket[%s]: %s", obj_key, snippet)
-                except Exception:
-                    pass
 
     def _extract_device_id(self, node: dict, key_hint: str | None) -> str | None:
         for key in ("device_id", "deviceId", "deviceID", "device"):
