@@ -167,6 +167,7 @@ class NestYaleGuestPasscodesSensor(NestYaleEntity, SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
     _attr_translation_key = "guest_passcodes"
+    _attr_name = "Guest Passcodes"
     entity_description = GUEST_PASSCODES_SENSOR_DESC
 
     def __init__(self, coordinator, device):
