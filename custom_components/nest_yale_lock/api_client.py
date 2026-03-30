@@ -1392,6 +1392,8 @@ class NestAPIClient:
                             )
                             continue
                         data = await resp.json()
+                    # --- DEBUG: log user/guest bucket data for name mapping ---
+                    self._log_user_guest_buckets(data)
                     overrides = self._extract_legacy_device_names(data)
                     if overrides:
                         self._legacy_name_overrides.update(overrides)
@@ -1525,6 +1527,36 @@ class NestAPIClient:
                     serial_map,
                     results,
                 )
+
+    def _log_user_guest_buckets(self, data: dict) -> None:
+        """Log user/guest bucket data from app_launch for name mapping analysis."""
+        if not isinstance(data, dict):
+            return
+        import json as _json
+        for top_key in ("user", "kryptonite", "shared", "structure", "link"):
+            if top_key in data:
+                try:
+                    snippet = _json.dumps(data[top_key], default=str)
+                    if len(snippet) > 5000:
+                        snippet = snippet[:5000] + "...(truncated)"
+                    _LOGGER.warning(
+                        "GUEST_NAME_DEBUG app_launch[%s]: %s", top_key, snippet,
+                    )
+                except Exception:
+                    _LOGGER.warning("GUEST_NAME_DEBUG app_launch[%s]: (unserializable)", top_key)
+        # Also check for updated_buckets pattern
+        for bucket in data.get("updated_buckets", data.get("objects", [])):
+            if not isinstance(bucket, dict):
+                continue
+            obj_key = bucket.get("object_key", "")
+            if any(prefix in str(obj_key) for prefix in ("user.", "kryptonite.", "link.", "shared.")):
+                try:
+                    snippet = _json.dumps(bucket, default=str)
+                    if len(snippet) > 3000:
+                        snippet = snippet[:3000] + "...(truncated)"
+                    _LOGGER.warning("GUEST_NAME_DEBUG bucket[%s]: %s", obj_key, snippet)
+                except Exception:
+                    pass
 
     def _extract_device_id(self, node: dict, key_hint: str | None) -> str | None:
         for key in ("device_id", "deviceId", "deviceID", "device"):
